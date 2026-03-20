@@ -4,10 +4,11 @@ import torch.nn as nn
 
 
 class WMGD(nn.Module):
-    def __init__(self, window_size=2, sigma=1):
+    def __init__(self, window_size=2, sigma=1, biased=True):
         super().__init__()
         self.window_size = window_size
         self.sigma = sigma
+        self.biased = biased
 
     def rbf_kernel(self, x, y):
         """计算RBF核矩阵"""
@@ -90,15 +91,24 @@ class WMGD(nn.Module):
 
         return K_composite
 
-    def compute_wmgd(self, Fs, Ft):
+    def compute_wmgd_squared(self, Fs, Ft):
         K, (B_s, B_t) = self.compute_composite_kernel_matrix(Fs, Ft)
-
         K_ss = K[:B_s, :B_s]
         K_tt = K[B_s:, B_s:]
         K_st = K[:B_s, B_s:]
-
-        wmgd_sq = (K_ss.mean() + K_tt.mean() - 2 * K_st.mean())
-        wmgd = torch.sqrt(torch.relu(wmgd_sq) + 1e-8)
+        if self.biased:
+            wmgd_sq_biased = K_ss.mean() + K_tt.mean() - 2 * K_st.mean()
+            wmgd = torch.sqrt(torch.relu(wmgd_sq_biased) + 1e-8)
+        else:
+            m = B_s
+            n = B_t
+            K_ss_sum = K_ss.sum() - torch.trace(K_ss)
+            K_tt_sum = K_tt.sum() - torch.trace(K_tt)
+            K_ss_unbiased_mean = K_ss_sum / (m * (m - 1)) if m > 1 else K_ss.mean()
+            K_tt_unbiased_mean = K_tt_sum / (n * (n - 1)) if n > 1 else K_tt.mean()
+            K_st_mean = K_st.mean()
+            wmgd_sq_unbiased = K_ss_unbiased_mean + K_tt_unbiased_mean - 2 * K_st_mean
+            wmgd = torch.sqrt(torch.relu(wmgd_sq_unbiased) + 1e-8)
 
         return wmgd
 
